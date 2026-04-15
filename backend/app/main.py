@@ -2,9 +2,13 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
+import logging
 
 from .config import settings
 from .routers import profile, plans, sessions, dashboard, ai_usage, offline
+from .routers import gamification, coaching
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="PaceForge API",
@@ -40,15 +44,75 @@ def verify_password(credentials: HTTPBasicCredentials = Depends(security)):
 
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-# All routes are protected by HTTP Basic auth
 app.include_router(profile.router, dependencies=[Depends(verify_password)])
 app.include_router(plans.router, dependencies=[Depends(verify_password)])
 app.include_router(sessions.router, dependencies=[Depends(verify_password)])
 app.include_router(dashboard.router, dependencies=[Depends(verify_password)])
 app.include_router(ai_usage.router, dependencies=[Depends(verify_password)])
 app.include_router(offline.router, dependencies=[Depends(verify_password)])
+app.include_router(gamification.router, dependencies=[Depends(verify_password)])
+app.include_router(coaching.router, dependencies=[Depends(verify_password)])
 
 
 @app.get("/health", tags=["health"])
 def health():
     return {"status": "ok", "app": settings.app_name}
+
+
+# ── Startup tasks ─────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup() -> None:
+    _seed_achievements()
+    _start_scheduler()
+
+
+def _seed_achievements() -> None:
+    from .database import SessionLocal
+    from .services.achievement_engine import seed_achievements
+    db = SessionLocal()
+    try:
+        seed_achievements(db)
+        logger.info("Achievements seeded.")
+    except Exception:
+        logger.exception("Failed to seed achievements — non-fatal.")
+    finally:
+        db.close()
+
+
+def _start_scheduler() -> None:
+    """Start a lightweight background scheduler for daily coaching tasks."""
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from .database import SessionLocal
+        from .services.coaching_engine import generate_daily_motivation, generate_weekly_summary, generate_weekly_challenge
+
+        scheduler = AsyncIOScheduler()
+
+        async def _daily_motivation_job():
+            db = SessionLocal()
+            try:
+                await generate_daily_motivation(db)
+            finally:
+                db.close()
+
+        async def _weekly_summary_job():
+            db = SessionLocal()
+            try:
+                await generate_weekly_summary(db)
+                await generate_weekly_challenge(db)
+            finally:
+                db.close()
+
+        # Daily motivation at 7am
+        scheduler.add_job(_daily_motivation_job, CronTrigger(hour=7, minute=0))
+        # Weekly summary Sunday at 8pm
+        scheduler.add_job(_weekly_summary_job, CronTrigger(day_of_week="sun", hour=20, minute=0))
+
+        scheduler.start()
+        logger.info("Coaching scheduler started.")
+    except ImportError:
+        logger.warning("apscheduler not installed — scheduled coaching messages disabled.")
+    except Exception:
+        logger.exception("Failed to start scheduler — non-fatal.")

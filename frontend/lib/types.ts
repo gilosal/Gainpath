@@ -236,6 +236,88 @@ export interface AIUsageSummary {
   by_feature: Record<string, { requests: number; tokens: number; cost_usd: number }>;
 }
 
+// ── Gamification ──────────────────────────────────────────────────────────────
+export interface StreakSnapshot {
+  current_streak: number;
+  longest_streak: number;
+  streak_start_date?: string;
+  last_workout_date?: string;
+  streak_frozen: boolean;
+  freeze_available: boolean;
+}
+
+export interface Achievement {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon_name: string;
+  category: "streak" | "volume" | "consistency" | "milestone";
+  threshold: number;
+  xp_reward: number;
+  earned: boolean;
+  earned_at?: string;
+}
+
+export interface XPState {
+  total_xp: number;
+  level: number;
+  xp_to_next_level: number;
+  recent_entries: Array<{
+    amount: number;
+    source: string;
+    note?: string;
+    created_at: string;
+  }>;
+}
+
+export interface WeeklyChallenge {
+  id: string;
+  week_start_date: string;
+  challenge_type: string;
+  title: string;
+  description: string;
+  target_value: number;
+  current_value: number;
+  status: "active" | "completed" | "failed" | "expired";
+  xp_reward: number;
+  progress_pct: number;
+}
+
+export interface PersonalRecord {
+  id: string;
+  created_at: string;
+  exercise_name: string;
+  record_type: string;
+  value: number;
+  previous_value?: number;
+  celebrated: boolean;
+}
+
+// ── Coaching ──────────────────────────────────────────────────────────────────
+export type CoachingMessageType =
+  | "daily_motivation"
+  | "post_workout"
+  | "weekly_summary"
+  | "nudge"
+  | "streak_risk";
+
+export interface CoachingMessage {
+  id: string;
+  created_at: string;
+  message_type: CoachingMessageType;
+  content: string;
+  displayed: boolean;
+  dismissed: boolean;
+}
+
+export interface ChatMessage {
+  id: string;
+  created_at: string;
+  role: "user" | "assistant";
+  content: string;
+}
+
 // ── Offline Queue ─────────────────────────────────────────────────────────────
 export interface OfflineQueueItem {
   id: string;

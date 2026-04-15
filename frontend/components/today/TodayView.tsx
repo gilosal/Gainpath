@@ -1,13 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { sessionsApi, plansApi } from "@/lib/api";
+import { sessionsApi, plansApi, gamificationApi, coachingApi } from "@/lib/api";
 import { todayISO, formatDate, sessionTypeColor, sessionTypeLabel, cn } from "@/lib/utils";
 import { PlanGeneratingSkeleton, SessionSkeletonCard } from "@/components/common/SkeletonCard";
 import { ActiveWorkout } from "./ActiveWorkout";
 import { QuickLogSheet } from "./QuickLogSheet";
-import type { SessionLog } from "@/lib/types";
+import { StreakBadge } from "@/components/gamification/StreakBadge";
+import { DailyMotivation } from "@/components/coach/DailyMotivation";
+import { ChallengeCard } from "@/components/gamification/ChallengeCard";
+import { PostWorkoutCard } from "@/components/coach/PostWorkoutCard";
+import { PRCelebration } from "@/components/gamification/PRCelebration";
+import type { SessionLog, PersonalRecord, CoachingMessage } from "@/lib/types";
 import { Play, CheckCircle2, SkipForward, Plus, Dumbbell, PersonStanding, Timer } from "lucide-react";
 
 const SESSION_ICONS: Record<string, React.ElementType> = {
@@ -20,6 +25,8 @@ export function TodayView() {
   const qc = useQueryClient();
   const [activeSession, setActiveSession] = useState<SessionLog | null>(null);
   const [logSheet, setLogSheet] = useState<SessionLog | null>(null);
+  const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
+  const [postWorkoutMsg, setPostWorkoutMsg] = useState<CoachingMessage | null>(null);
 
   const { data: sessions, isLoading } = useQuery({
     queryKey: ["sessions", "today"],
@@ -34,7 +41,29 @@ export function TodayView() {
         overall_rpe: rpe,
         completed_at: new Date().toISOString(),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["sessions", "today"] }),
+    onSuccess: async (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ["sessions", "today"] });
+      qc.invalidateQueries({ queryKey: ["streak"] });
+      qc.invalidateQueries({ queryKey: ["xp"] });
+      qc.invalidateQueries({ queryKey: ["challenges"] });
+
+      // Poll for post-workout results (background tasks may take a moment)
+      await new Promise((r) => setTimeout(r, 2500));
+
+      const [prs, msg] = await Promise.allSettled([
+        gamificationApi.uncelebratedPrs(),
+        coachingApi.latestMessage("post_workout"),
+      ]);
+
+      if (prs.status === "fulfilled" && prs.value.length > 0) {
+        setNewPRs(prs.value);
+      }
+      if (msg.status === "fulfilled" && msg.value) {
+        setPostWorkoutMsg(msg.value);
+      }
+
+      qc.invalidateQueries({ queryKey: ["coaching"] });
+    },
   });
 
   const skipMutation = useMutation({
@@ -68,11 +97,14 @@ export function TodayView() {
         </p>
         <div className="flex items-end justify-between mt-0.5">
           <h1 className="text-2xl font-bold text-foreground">Today</h1>
-          {totalCount > 0 && (
-            <span className="text-sm text-muted-foreground">
-              {completedCount}/{totalCount} done
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {totalCount > 0 && (
+              <span className="text-sm text-muted-foreground">
+                {completedCount}/{totalCount} done
+              </span>
+            )}
+            <StreakBadge size="sm" />
+          </div>
         </div>
         {/* Progress bar */}
         {totalCount > 0 && (
@@ -87,6 +119,17 @@ export function TodayView() {
 
       {/* Content */}
       <div className="px-4 py-4 space-y-3">
+        {/* Daily AI motivation */}
+        <DailyMotivation />
+
+        {/* Post-workout feedback */}
+        {postWorkoutMsg && (
+          <PostWorkoutCard
+            message={postWorkoutMsg}
+            onDismiss={() => setPostWorkoutMsg(null)}
+          />
+        )}
+
         {isLoading ? (
           <>
             <SessionSkeletonCard />
@@ -105,6 +148,9 @@ export function TodayView() {
         ) : (
           <RestDayCard />
         )}
+
+        {/* Weekly challenge */}
+        <ChallengeCard />
       </div>
 
       {/* Quick log sheet */}
@@ -113,6 +159,14 @@ export function TodayView() {
           session={logSheet}
           open={!!logSheet}
           onClose={() => setLogSheet(null)}
+        />
+      )}
+
+      {/* PR celebration overlay */}
+      {newPRs.length > 0 && (
+        <PRCelebration
+          prs={newPRs}
+          onClose={() => setNewPRs([])}
         />
       )}
     </div>
@@ -155,7 +209,6 @@ function SessionCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-foreground text-sm leading-tight truncate">
-              {/* We'd fetch the PlannedSession title — use session_type as fallback */}
               {sessionTypeLabel(session.session_type)} Session
             </h3>
             {isCompleted && <CheckCircle2 size={15} className="text-primary flex-shrink-0" />}

@@ -47,6 +47,79 @@ class AIClient:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
+    async def generate_text(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        feature: str = "other",
+        db=None,
+        model_override: Optional[str] = None,
+    ) -> str:
+        """
+        Generate a free-form text response (no structured JSON required).
+        Used for conversational coaching chat.
+        """
+        primary = model_override or self.default_model
+        models_to_try = [primary]
+        if self.fallback_model and self.fallback_model != primary:
+            models_to_try.append(self.fallback_model)
+
+        last_exc: Exception = AIGenerationError("No models configured.")
+        for model in models_to_try:
+            start_ms = time.time()
+            success = False
+            error_msg: Optional[str] = None
+            usage_data: dict = {}
+            request_id: Optional[str] = None
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://paceforge.local",
+                    "X-Title": "PaceForge",
+                }
+                payload = {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.8,
+                }
+                async with httpx.AsyncClient(timeout=settings.ai_timeout) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    request_id = data.get("id")
+                    usage_data = data.get("usage", {})
+                    content = data["choices"][0]["message"]["content"]
+                    success = True
+                    return content
+            except Exception as exc:
+                error_msg = str(exc)
+                last_exc = AIGenerationError(f"[{model}] {error_msg}")
+                logger.warning("generate_text model %s failed: %s", model, exc)
+            finally:
+                duration_ms = int((time.time() - start_ms) * 1000)
+                self._log_usage(
+                    db=db,
+                    model=model,
+                    feature=feature,
+                    plan_type=None,
+                    usage=usage_data,
+                    duration_ms=duration_ms,
+                    success=success,
+                    error_message=error_msg,
+                    request_id=request_id,
+                )
+
+        raise last_exc
+
     async def generate(
         self,
         *,

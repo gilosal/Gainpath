@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -17,6 +17,38 @@ from ..schemas.session import (
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+async def _on_session_completed(session_id: UUID, rpe: Optional[int], db: Session) -> None:
+    """Background task chain triggered when a session is marked completed."""
+    from ..services.pr_detector import detect_prs_for_session
+    from ..services.streak_engine import update_streak
+    from ..services.achievement_engine import check_achievements, grant_xp, xp_for_session
+    from ..services.coaching_engine import generate_post_workout_feedback
+
+    session = db.query(SessionLog).filter(SessionLog.id == session_id).first()
+    if not session:
+        return
+
+    # 1. Detect personal records
+    new_prs = detect_prs_for_session(db, session_id)
+
+    # 2. Update streak
+    update_streak(db)
+
+    # 3. Grant XP
+    xp = xp_for_session(session.session_type, rpe)
+    grant_xp(db, xp, "workout_complete", session_id, f"{session.session_type} session")
+
+    # 4. Check achievements
+    context = {"completed_at": session.completed_at or datetime.utcnow()}
+    check_achievements(db, "session_completed", context)
+    if new_prs:
+        check_achievements(db, "pr_detected", {})
+    check_achievements(db, "streak_updated", {})
+
+    # 5. Generate post-workout coaching message
+    await generate_post_workout_feedback(db, session_id, xp)
 
 
 # ── Session logs ──────────────────────────────────────────────────────────────
@@ -80,14 +112,26 @@ def get_session(session_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.patch("/{session_id}", response_model=SessionLogRead)
-def update_session(session_id: UUID, payload: SessionLogUpdate, db: Session = Depends(get_db)):
+async def update_session(
+    session_id: UUID,
+    payload: SessionLogUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     log = db.query(SessionLog).filter(SessionLog.id == session_id).first()
     if not log:
         raise HTTPException(404, "Session not found")
+
+    was_completed = log.status == "completed"
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(log, field, value)
     db.commit()
     db.refresh(log)
+
+    # Fire the completion hook chain if this update just completed the session
+    if not was_completed and log.status == "completed":
+        background_tasks.add_task(_on_session_completed, session_id, log.overall_rpe, db)
+
     return log
 
 
