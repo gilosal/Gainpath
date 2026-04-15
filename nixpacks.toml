@@ -1,0 +1,20 @@
+# Railpack / Nixpacks configuration for PaceForge monorepo
+# Runs both the Python (FastAPI) backend and Node (Next.js) frontend
+
+[phases.setup]
+nixPkgs = ["python312", "nodejs_20", "npm"]
+aptPkgs = ["libpq-dev"]
+
+[phases.install]
+cmds = [
+  "cd backend && pip install --no-cache-dir -r requirements.txt",
+  "cd frontend && npm ci",
+]
+
+[phases.build]
+cmds = [
+  "cd frontend && NEXT_OUTPUT=standalone npm run build",
+]
+
+[start]
+cmd = "bash start.sh"
