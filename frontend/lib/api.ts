@@ -18,6 +18,13 @@ import type {
   CalendarWeek,
   AIUsageSummary,
   OfflineQueueItem,
+  StreakSnapshot,
+  Achievement,
+  XPState,
+  WeeklyChallenge,
+  PersonalRecord,
+  CoachingMessage,
+  ChatMessage,
 } from "./types";
 
 const BASE_URL =
@@ -175,4 +182,49 @@ export const offlineApi = {
       body: JSON.stringify(item),
     }),
   sync: () => apiFetch<{ synced: number; failed: number; total: number }>("/offline/sync", { method: "POST" }),
+};
+
+// ── Gamification ──────────────────────────────────────────────────────────────
+
+export const gamificationApi = {
+  streak: () => apiFetch<StreakSnapshot>("/gamification/streak"),
+  freezeStreak: () => apiFetch<{ message: string }>("/gamification/streak/freeze", { method: "POST" }),
+  achievements: () => apiFetch<Achievement[]>("/gamification/achievements"),
+  xp: () => apiFetch<XPState>("/gamification/xp"),
+  challenges: () => apiFetch<WeeklyChallenge[]>("/gamification/challenges"),
+  prs: (exercise?: string) => {
+    const q = exercise ? `?exercise=${encodeURIComponent(exercise)}` : "";
+    return apiFetch<PersonalRecord[]>(`/gamification/prs${q}`);
+  },
+  uncelebratedPrs: () => apiFetch<PersonalRecord[]>("/gamification/prs/uncelebrated"),
+  celebratePr: (prId: string) =>
+    apiFetch<{ ok: boolean }>(`/gamification/prs/${prId}/celebrate`, { method: "PATCH" }),
+};
+
+// ── Coaching ──────────────────────────────────────────────────────────────────
+
+export const coachingApi = {
+  messages: (messageType?: string) => {
+    const q = messageType ? `?message_type=${messageType}` : "";
+    return apiFetch<CoachingMessage[]>(`/coaching/messages${q}`);
+  },
+  latestMessage: (messageType: string) =>
+    apiFetch<CoachingMessage | null>(`/coaching/messages/latest?message_type=${messageType}`),
+  dismissMessage: (id: string) =>
+    apiFetch<void>(`/coaching/messages/${id}/dismiss`, { method: "POST" }),
+  markDisplayed: (id: string) =>
+    apiFetch<void>(`/coaching/messages/${id}/mark-displayed`, { method: "POST" }),
+  generateDaily: () =>
+    apiFetch<{ status: string }>("/coaching/generate/daily", { method: "POST" }),
+  generateWeeklySummary: () =>
+    apiFetch<{ status: string }>("/coaching/generate/weekly-summary", { method: "POST" }),
+  triggerPostWorkout: (sessionId: string) =>
+    apiFetch<{ status: string }>(`/coaching/generate/post-workout/${sessionId}`, { method: "POST" }),
+  chatHistory: (limit = 50) =>
+    apiFetch<ChatMessage[]>(`/coaching/chat?limit=${limit}`),
+  sendChat: (message: string) =>
+    apiFetch<{ user_message: ChatMessage; assistant_message: ChatMessage }>("/coaching/chat", {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
 };

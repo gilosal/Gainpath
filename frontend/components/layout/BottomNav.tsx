@@ -2,14 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CalendarDays, BarChart2, Settings, Sun } from "lucide-react";
+import { CalendarDays, BarChart2, Settings, Sun, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
-  { href: "/today",    label: "Today",    Icon: Sun         },
+  { href: "/today",    label: "Today",    Icon: Sun          },
   { href: "/calendar", label: "Calendar", Icon: CalendarDays },
-  { href: "/progress", label: "Progress", Icon: BarChart2   },
-  { href: "/settings", label: "Settings", Icon: Settings    },
+  { href: "/coach",    label: "Coach",    Icon: MessageCircle },
+  { href: "/progress", label: "Progress", Icon: BarChart2    },
+  { href: "/settings", label: "Settings", Icon: Settings     },
 ];
 
 export function BottomNav() {
@@ -39,11 +40,11 @@ export function BottomNav() {
                 )}
               >
                 <Icon
-                  size={22}
+                  size={20}
                   strokeWidth={active ? 2.5 : 1.8}
                   className="transition-transform duration-150 active:scale-90"
                 />
-                <span className={cn("text-[10px] font-medium", active && "font-semibold")}>
+                <span className={cn("text-[9px] font-medium", active && "font-semibold")}>
                   {label}
                 </span>
               </Link>
