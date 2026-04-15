@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode */
+    --background: 0 0% 98%;
+    --foreground: 222 47% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 8%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --primary: 142 72% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 94%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 94%;
+    --accent-foreground: 222 47% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 222 47% 4%;
+    --foreground: 210 40% 96%;
+    --card: 222 40% 8%;
+    --card-foreground: 210 40% 96%;
+    --border: 217 32% 16%;
+    --input: 217 32% 16%;
+    --primary: 142 70% 45%;
+    --primary-foreground: 144 80% 8%;
+    --secondary: 217 32% 14%;
+    --secondary-foreground: 210 40% 96%;
+    --muted: 217 32% 14%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 217 32% 14%;
+    --accent-foreground: 210 40% 96%;
+    --destructive: 0 63% 42%;
+    --destructive-foreground: 210 40% 96%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    /* Prevent overscroll bounce on iOS */
+    overscroll-behavior: none;
+    -webkit-overflow-scrolling: touch;
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    height: 100%;
+    /* Account for iOS safe areas */
+    padding-top: env(safe-area-inset-top);
+  }
+
+  /* Tap highlight removal for touch UIs */
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  /* Safe area helpers */
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Skeleton shimmer background */
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted)) 25%,
+      hsl(var(--muted-foreground) / 0.15) 50%,
+      hsl(var(--muted)) 75%
+    );
+    background-size: 400% 100%;
+    animation: shimmer 1.5s infinite linear;
+  }
+
+  /* Session type color dots */
+  .dot-run    { @apply bg-run; }
+  .dot-lift   { @apply bg-lift; }
+  .dot-mob    { @apply bg-mobility; }
+  .dot-rest   { @apply bg-muted-foreground; }
+
+  /* Large touch targets (min 44×44px per WCAG) */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  }
+
+  /* RPE color scale */
+  .rpe-low    { @apply text-green-400; }
+  .rpe-mid    { @apply text-yellow-400; }
+  .rpe-high   { @apply text-orange-400; }
+  .rpe-max    { @apply text-red-400; }
+}
+
+/* Rest timer pulse ring */
+@keyframes ring-pulse {
+  0%, 100% { transform: scale(1);   opacity: 0.8; }
+  50%       { transform: scale(1.08); opacity: 0.4; }
+}
+.ring-pulse { animation: ring-pulse 1s ease-in-out infinite; }
+
+/* Swipeable row for set logging */
+.swipe-row {
+  touch-action: pan-x;
+  user-select: none;
+}
