@@ -4,11 +4,11 @@ set -e
 # Run database migrations
 echo "==> Running database migrations"
 cd /app/backend
-alembic upgrade head
+python -m alembic upgrade head
 
 # Start backend (FastAPI) in background
 echo "==> Starting backend on port ${PORT:-8000}"
-uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" &
+python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}" &
 BACKEND_PID=$!
 
 # Start frontend (Next.js standalone) in background
