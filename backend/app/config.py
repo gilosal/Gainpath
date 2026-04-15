@@ -1,10 +1,18 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from typing import Optional
 
 
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql://paceforge:paceforge@localhost:5432/paceforge"
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def assemble_db_url(cls, v: str) -> str:
+        if isinstance(v, str) and v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        return v
 
     # Auth
     secret_key: str = "changeme-secret-key-32chars-minimum"

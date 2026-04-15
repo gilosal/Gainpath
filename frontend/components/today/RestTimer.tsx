@@ -68,7 +68,10 @@ export function RestTimer({ seconds, onDone, onSkip }: RestTimerProps) {
       {/* +30s / Skip */}
       <div className="flex gap-3">
         <button
-          onClick={() => setAddedTime((a) => a + 30) || setRemaining((r) => r + 30)}
+          onClick={() => {
+            setAddedTime((a) => a + 30);
+            setRemaining((r) => r + 30);
+          }}
           className="px-5 py-2.5 rounded-xl bg-secondary text-secondary-foreground text-sm font-medium touch-target active:scale-95 transition-transform"
         >
           +30s

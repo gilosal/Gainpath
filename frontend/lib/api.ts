@@ -27,8 +27,9 @@ import type {
   ChatMessage,
 } from "./types";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Requests go through the frontend's runtime proxy route so the backend URL
+// is resolved on the server at request time, not during the Docker build.
+const BASE_URL = "/api/proxy";
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
