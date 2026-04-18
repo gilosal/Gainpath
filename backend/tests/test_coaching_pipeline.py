@@ -67,12 +67,12 @@ class TestAIClientRetryBehavior:
         assert "reraise=True" in source
 
     def test_retryable_exceptions_include_timeout(self):
-        assert httpx_module := __import__("httpx")
-        assert httpx_module.TimeoutException in _RETRYABLE
+        import httpx as httpx_mod
+        assert httpx_mod.TimeoutException in _RETRYABLE
 
     def test_retryable_exceptions_include_connect_error(self):
-        assert httpx_module := __import__("httpx")
-        assert httpx_module.ConnectError in _RETRYABLE
+        import httpx as httpx_mod
+        assert httpx_mod.ConnectError in _RETRYABLE
 
     def test_retry_uses_settings_max_retries(self):
         """US-004 fix: retry count should reference settings, not be hardcoded."""
@@ -157,5 +157,6 @@ class TestCoachingBackgroundTaskDBIsolation:
         assert "db.close()" in source
 
     def test_session_completion_bg_task_creates_own_session(self):
+        from app.routers.sessions import _on_session_completed
         source = inspect.getsource(_on_session_completed)
         assert "SessionLocal()" in source

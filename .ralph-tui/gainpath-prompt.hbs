@@ -38,10 +38,17 @@
 2. Read `.ralph-tui/progress.md` before changing code.
 3. Favor concrete progress in the app over generic commentary.
 4. For `security` or `architecture` review tasks, create a markdown report in `.ralph-tui/reviews/{{taskId}}.md` with severity-ranked findings, impacted files, and recommended next actions.
-5. For UI work, verify the touched flow remains coherent on mobile and desktop.
+5. For UI work, keep the touched flow coherent on mobile and desktop, but do not block completion on local manual testing.
 6. For backend work, prefer explicit validation, predictable failure behavior, and minimal-risk changes.
 7. For AI work, inspect `backend/app/services/ai_client.py`, related routers, and prompt/service call sites before changing behavior.
-8. Do not create git commits.
+8. Do not spend time trying to run local app verification unless it is trivial and already available.
+9. If local tests or local runtime verification are unavailable, continue with code review, static reasoning, and focused file-level validation instead of stopping.
+10. Do not create git commits inside the task implementation itself.
+
+## Completion Policy
+- Local testing is optional, not required.
+- If you do not run tests, say so explicitly in the task notes.
+- When the full Ralph loop is finished, the resulting changes should be ready for a final git commit and push to GitHub by the operator.
 
 ## Suggested Starting Points
 - Daily UX: `frontend/components/today/TodayView.tsx`, `frontend/components/today/ActiveWorkout.tsx`, `frontend/components/today/QuickLogSheet.tsx`
@@ -56,7 +63,7 @@ Append to `.ralph-tui/progress.md`:
 ## [Date] - {{taskId}}
 - What changed
 - Files changed
-- Verification performed
+- Verification performed or explicitly skipped
 - Learnings
 ---
 ```

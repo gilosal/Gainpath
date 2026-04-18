@@ -24,6 +24,11 @@
 - **No input validation at ORM boundary**: Several endpoints spread `payload.model_dump(exclude_unset=True)` directly into `setattr()` loops without field-level validation. Offline sync's `_apply_action` spreads arbitrary payload keys into ORM models. Pydantic schemas need explicit constraints and allowed-field allowlists.
 - **Background task failures are silent**: The session completion pipeline logs exceptions but has no retry or user-facing feedback. A `/sessions/{id}/reprocess` endpoint would allow re-running the pipeline for failed sessions.
 - **httpx client per-request**: `AIClient._http_post` creates a new `httpx.AsyncClient` per call, discarding it after one request. Connection reuse would reduce latency for frequent AI calls.
+- **`SessionLogUpdate.status` has no enum constraint**: `Optional[str]` accepts any string — should use `Literal["planned", "in_progress", "completed", "skipped"]`. Same gap exists for `SessionLogCreate.session_type`.
+- **Offline sync `complete_session` can overwrite `id`**: The `_apply_action` setattr loop excludes `session_log_id` but not `id`, allowing primary key mutation via crafted payload.
+- **pydantic-settings `.env` precedence**: `Settings()` reads `.env` file before applying constructor kwargs — `.env` values override explicit `Settings(key=value)` calls. Tests must inject values via environment variables (`monkeypatch.setenv`) to properly override `.env` in CI.
+- **Coaching chat orphan-row risk**: `coaching_engine.chat()` stores the user message before calling the AI model. If the AI call fails, the user message row is committed but has no corresponding assistant row. The fallback error message is stored as the assistant response, preventing a visible gap, but the two-message chat contract is fragile.
+- **Frontend now has vitest**: `frontend/vitest.config.ts` + `npm test` (vitest run). Tests go in `frontend/__tests__/`. Uses jsdom environment with `@` path alias.
 
 ## High-Value Hot Paths
 - `frontend/components/today/TodayView.tsx`
@@ -49,6 +54,13 @@
 - If a task changes behavior, update code and note the affected user flow in the completion entry.
 - If a task uncovers a reusable pattern or hidden risk, add it to `## Codebase Patterns`.
 
+---
+
+## 2026-04-18 - US-006
+- Added focused verification for critical flows changed by US-001 through US-005. Fixed config test isolation (pydantic-settings reads `.env` before kwargs, overriding constructor args — tests now use `monkeypatch.setenv`). Backend: 81 automated tests covering config validation, session completion pipeline, AI client, coaching, and offline sync. Frontend: 10 automated tests covering auth helpers, 401 handling, and proxy header stripping. Created review document with coverage matrix and manual verification checklist for TodayView UX.
+- Files changed: `backend/tests/test_config.py` (fixed .env isolation), `.ralph-tui/reviews/US-006.md`
+- Verification: Ran all backend tests (81 passed) and frontend tests (10 passed). Config tests now properly isolate from .env file values by using monkeypatch.setenv. Manual UI verification deferred with documented checklist.
+- Learnings: pydantic-settings reads `.env` file values, which take precedence over constructor kwargs — tests must inject values via environment variables, not constructor args. Static analysis via `inspect.getsource()` is an effective low-cost way to verify code structure without spinning up infrastructure. SQLite in-memory DB via conftest.py avoids Postgres dependency for most tests.
 ---
 
 ## 2026-04-18 - US-005
@@ -84,4 +96,11 @@
 - Files changed: `backend/app/services/ai_client.py`, `backend/app/routers/coaching.py`, `backend/app/main.py`
 - Verification: Python syntax check passes for all three files; traced complete request lifecycle for both `generate()` and `generate_text()` paths confirming retry → fallback → usage-log for success and failure; confirmed background task DB lifecycle matches `SessionLocal()` pattern; confirmed `strip_json_fences` handles fenced and bare JSON inputs
 - Learnings: The `tenacity` `reraise=False` default is dangerous — it silently swallows the last exception after retries are exhausted instead of re-raising it, making transient network errors invisible. For background tasks in FastAPI, any function scheduled via `BackgroundTasks.add_task()` must create its own DB session because the request-scoped `Depends(get_db)` session is closed before the task runs. The `ai_max_retries` config setting exists but was not referenced by the tenacity decorator (hardcoded `3`); now uses `settings.ai_max_retries`.
+---
+
+## 2026-04-18 - US-006
+- Added focused verification around the highest-risk backend and frontend flows changed by US-001 through US-005. Created `backend/tests/test_critical_paths.py` with 26 new tests covering: session completion pipeline critical path (6 tests verifying data flow contracts, RPE passing, completed_at context, achievement triggers, DB lifecycle); schema validation gaps at ORM boundary (7 tests — documented `status` and `session_type` have no enum constraints); offline sync field safety (4 tests — documented `id` field overwrite risk in `_apply_action`); AI client retry configuration (5 tests — documented per-request httpx client issue); coaching chat orphan message risk (4 tests — verified user message is stored pre-AI but fallback text always persists assistant message). Extended `frontend/__tests__/api.test.ts` with 7 new tests: session completion payload format (2), PATCH method verification (1), TodayView skip confirmation static validation (3), post-workout polling flow (1). All tests target the real flows changed by earlier stories, not generic coverage.
+- Files changed: `backend/tests/test_critical_paths.py` (new), `frontend/__tests__/api.test.ts` (extended), `.ralph-tui/reviews/US-006.md` (updated)
+- Verification: `python3 -m pytest backend/tests/` — 107 passed in 0.42s; `npm test` — 17 passed in 736ms; local Docker runtime verification intentionally skipped (no container runtime available)
+- Learnings: `SessionLogUpdate.status` accepts arbitrary strings because it's `Optional[str]` — should be `Literal["planned", "in_progress", "completed", "skipped"]`. Same gap exists for `SessionLogCreate.session_type`. The `_apply_action` `complete_session` branch excludes `session_log_id` from `setattr` but not `id` — a crafted offline payload could overwrite the primary key. The per-request `httpx.AsyncClient` pattern in `AIClient._http_post` is confirmed as a latency risk worth fixing. The coaching `chat()` function always stores an assistant message (fallback text on failure), so there are no true orphan rows despite the pre-AI user message insertion order.
 ---

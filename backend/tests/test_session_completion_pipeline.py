@@ -139,7 +139,7 @@ class TestOnSessionCompletedAsyncExecution:
     async def test_can_be_awaited(self):
         """The function is async and should be awaitable without error
         when the session doesn't exist (early return path)."""
-        with patch("app.routers.sessions.SessionLocal") as MockSessionLocal:
+        with patch("app.database.SessionLocal") as MockSessionLocal:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.first.return_value = None
             MockSessionLocal.return_value = mock_db
