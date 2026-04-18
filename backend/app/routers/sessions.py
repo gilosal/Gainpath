@@ -19,36 +19,66 @@ from ..schemas.session import (
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-async def _on_session_completed(session_id: UUID, rpe: Optional[int], db: Session) -> None:
-    """Background task chain triggered when a session is marked completed."""
+async def _on_session_completed(session_id: UUID, rpe: Optional[int]) -> None:
+    """Background task chain triggered when a session is marked completed.
+
+    Each step is isolated so a failure in one does not block the others.
+    Uses its own DB session since the request session is closed by the time
+    this background task runs.
+    """
+    import logging
+    from ..database import SessionLocal
     from ..services.pr_detector import detect_prs_for_session
     from ..services.streak_engine import update_streak
     from ..services.achievement_engine import check_achievements, grant_xp, xp_for_session
     from ..services.coaching_engine import generate_post_workout_feedback
 
-    session = db.query(SessionLog).filter(SessionLog.id == session_id).first()
-    if not session:
-        return
+    log = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        session = db.query(SessionLog).filter(SessionLog.id == session_id).first()
+        if not session:
+            return
 
-    # 1. Detect personal records
-    new_prs = detect_prs_for_session(db, session_id)
+        new_prs: list = []
 
-    # 2. Update streak
-    update_streak(db)
+        # 1. Detect personal records
+        try:
+            new_prs = detect_prs_for_session(db, session_id)
+        except Exception:
+            log.exception("PR detection failed for session %s", session_id)
 
-    # 3. Grant XP
-    xp = xp_for_session(session.session_type, rpe)
-    grant_xp(db, xp, "workout_complete", session_id, f"{session.session_type} session")
+        # 2. Update streak
+        try:
+            update_streak(db)
+        except Exception:
+            log.exception("Streak update failed for session %s", session_id)
 
-    # 4. Check achievements
-    context = {"completed_at": session.completed_at or datetime.utcnow()}
-    check_achievements(db, "session_completed", context)
-    if new_prs:
-        check_achievements(db, "pr_detected", {})
-    check_achievements(db, "streak_updated", {})
+        # 3. Grant XP
+        xp = 0
+        try:
+            xp = xp_for_session(session.session_type, rpe)
+            grant_xp(db, xp, "workout_complete", session_id, f"{session.session_type} session")
+        except Exception:
+            log.exception("XP grant failed for session %s", session_id)
 
-    # 5. Generate post-workout coaching message
-    await generate_post_workout_feedback(db, session_id, xp)
+        # 4. Check achievements
+        try:
+            context = {"completed_at": session.completed_at or datetime.utcnow()}
+            check_achievements(db, "session_completed", context)
+            if new_prs:
+                check_achievements(db, "pr_detected", {})
+            check_achievements(db, "streak_updated", {})
+        except Exception:
+            log.exception("Achievement check failed for session %s", session_id)
+
+        # 5. Generate post-workout coaching message
+        try:
+            await generate_post_workout_feedback(db, session_id, xp)
+        except Exception:
+            log.exception("Post-workout coaching failed for session %s", session_id)
+    finally:
+        db.close()
 
 
 # ── Session logs ──────────────────────────────────────────────────────────────
@@ -125,12 +155,16 @@ async def update_session(
     was_completed = log.status == "completed"
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(log, field, value)
+
+    if not was_completed and log.status == "completed":
+        if log.completed_at is None:
+            log.completed_at = datetime.utcnow()
+
     db.commit()
     db.refresh(log)
 
-    # Fire the completion hook chain if this update just completed the session
     if not was_completed and log.status == "completed":
-        background_tasks.add_task(_on_session_completed, session_id, log.overall_rpe, db)
+        background_tasks.add_task(_on_session_completed, session_id, log.overall_rpe)
 
     return log
 

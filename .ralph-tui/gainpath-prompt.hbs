@@ -1,0 +1,67 @@
+{{#if prdContent}}
+## Project Backlog
+{{prdContent}}
+{{/if}}
+
+{{#if codebasePatterns}}
+## Existing Codebase Context
+{{codebasePatterns}}
+{{/if}}
+
+## Task
+- ID: {{taskId}}
+- Title: {{taskTitle}}
+{{#if labels}}
+- Labels: {{labels}}
+{{/if}}
+{{#if dependsOn}}
+- Depends on: {{dependsOn}}
+{{/if}}
+
+{{#if taskDescription}}
+## Description
+{{taskDescription}}
+{{/if}}
+
+{{#if acceptanceCriteria}}
+## Acceptance Criteria
+{{acceptanceCriteria}}
+{{/if}}
+
+{{#if recentProgress}}
+## Recent Progress
+{{recentProgress}}
+{{/if}}
+
+## Gainpath-Specific Guidance
+1. Start from the real product hot paths, not a repo-wide scan.
+2. Read `.ralph-tui/progress.md` before changing code.
+3. Favor concrete progress in the app over generic commentary.
+4. For `security` or `architecture` review tasks, create a markdown report in `.ralph-tui/reviews/{{taskId}}.md` with severity-ranked findings, impacted files, and recommended next actions.
+5. For UI work, verify the touched flow remains coherent on mobile and desktop.
+6. For backend work, prefer explicit validation, predictable failure behavior, and minimal-risk changes.
+7. For AI work, inspect `backend/app/services/ai_client.py`, related routers, and prompt/service call sites before changing behavior.
+8. Do not create git commits.
+
+## Suggested Starting Points
+- Daily UX: `frontend/components/today/TodayView.tsx`, `frontend/components/today/ActiveWorkout.tsx`, `frontend/components/today/QuickLogSheet.tsx`
+- Frontend auth/data flow: `frontend/lib/api.ts`, `frontend/app/api/proxy/[...path]/route.ts`
+- Backend auth/config: `backend/app/main.py`, `backend/app/config.py`
+- Session workflow: `backend/app/routers/sessions.py`
+- Coaching/AI: `backend/app/routers/coaching.py`, `backend/app/services/ai_client.py`, `backend/app/services/coaching_engine.py`
+
+## Before Completing
+Append to `.ralph-tui/progress.md`:
+```md
+## [Date] - {{taskId}}
+- What changed
+- Files changed
+- Verification performed
+- Learnings
+---
+```
+
+If you discovered a reusable codebase pattern or a material risk, add it near the top of `## Codebase Patterns`.
+
+When finished, signal completion with:
+<promise>COMPLETE</promise>

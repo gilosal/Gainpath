@@ -1,0 +1,132 @@
+{
+  "name": "Gainpath Execution Backlog",
+  "description": "Actionable Ralph backlog for improving Gainpath across security, UX, architecture, session reliability, and AI behavior.",
+  "branchName": "master",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Harden auth and configuration defaults",
+      "description": "Remove insecure default behavior around Basic auth, password handling, and backend configuration so the app fails safely in local and deployed environments.",
+      "acceptanceCriteria": [
+        "Security-sensitive defaults in backend configuration are reviewed and tightened where practical.",
+        "Authentication flow between frontend and backend is reviewed for obvious weaknesses, especially localStorage password handling and proxy behavior.",
+        "At least one concrete hardening improvement is implemented, and any remaining risks are documented."
+      ],
+      "priority": 1,
+      "passes": true,
+      "dependsOn": [],
+      "labels": [
+        "security",
+        "backend",
+        "frontend"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-002",
+      "title": "Stabilize session completion side effects",
+      "description": "Review and improve the workflow that runs when a session is completed, with emphasis on background task safety, DB/session lifecycle correctness, and predictable user-visible results.",
+      "acceptanceCriteria": [
+        "The completion flow in the sessions router and downstream services is reviewed end to end.",
+        "At least one concrete reliability issue in the completion pipeline is fixed.",
+        "The change preserves or improves PR detection, streak/XP updates, and post-workout coaching behavior."
+      ],
+      "priority": 1,
+      "passes": true,
+      "dependsOn": [],
+      "labels": [
+        "backend",
+        "reliability",
+        "feature"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-003",
+      "title": "Improve the Today flow for mobile-first usability",
+      "description": "Refine the main Today experience so it feels more intentional, faster to act on, and clearer for session start, quick log, skip, and post-workout flows.",
+      "acceptanceCriteria": [
+        "The Today flow receives at least one material UX improvement in the main interaction path.",
+        "The updated surface remains coherent on both mobile and desktop.",
+        "No existing session actions regress."
+      ],
+      "priority": 2,
+      "passes": true,
+      "dependsOn": [
+        "US-002"
+      ],
+      "labels": [
+        "ui",
+        "frontend",
+        "mobile"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-004",
+      "title": "Audit and harden AI client fallback behavior",
+      "description": "Improve the AI service layer and coaching endpoints so timeouts, invalid JSON, provider failures, and empty responses degrade in a predictable and debuggable way.",
+      "acceptanceCriteria": [
+        "AI client request, retry, and fallback behavior is reviewed in code.",
+        "At least one concrete guardrail or failure-path improvement is implemented.",
+        "Usage logging remains functional for both success and failure cases."
+      ],
+      "priority": 2,
+      "passes": true,
+      "dependsOn": [
+        "US-001"
+      ],
+      "labels": [
+        "ai",
+        "backend",
+        "reliability"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-005",
+      "title": "Produce an architecture review with prioritized debt map",
+      "description": "Create a concise architecture review covering frontend boundaries, backend layering, data flow, auth boundaries, and deployment assumptions, with practical next steps.",
+      "acceptanceCriteria": [
+        "A review document is created under `.ralph-tui/reviews/US-005.md`.",
+        "The review includes severity-ranked findings tied to specific files or modules.",
+        "Recommendations distinguish short-term fixes from medium-term refactors."
+      ],
+      "priority": 2,
+      "passes": true,
+      "dependsOn": [
+        "US-001",
+        "US-002"
+      ],
+      "labels": [
+        "architecture",
+        "review"
+      ],
+      "completionNotes": "Completed by agent"
+    },
+    {
+      "id": "US-006",
+      "title": "Add focused verification for critical flows",
+      "description": "Add pragmatic verification around the highest-risk backend and frontend areas touched by the earlier stories so future iterations ship with less regression risk.",
+      "acceptanceCriteria": [
+        "At least one critical backend path and one critical frontend path gain meaningful verification or well-documented manual checks.",
+        "Verification targets the real flows changed by earlier stories.",
+        "The result improves confidence without trying to build exhaustive test coverage."
+      ],
+      "priority": 3,
+      "passes": false,
+      "dependsOn": [
+        "US-002",
+        "US-003",
+        "US-004"
+      ],
+      "labels": [
+        "testing",
+        "quality"
+      ]
+    }
+  ],
+  "metadata": {
+    "updatedAt": "2026-04-18T15:56:48.308Z"
+  }
+}

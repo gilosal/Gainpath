@@ -63,8 +63,23 @@ def health():
 
 @app.on_event("startup")
 async def startup() -> None:
+    _check_insecure_config()
     _seed_achievements()
     _start_scheduler()
+
+
+def _check_insecure_config() -> None:
+    if settings.app_password == "changeme":
+        logger.warning(
+            "⚠  app_password is still the default 'changeme' — "
+            "anyone can access this instance. Set APP_PASSWORD before deploying."
+        )
+    if settings.secret_key == "changeme-secret-key-32chars-minimum":
+        logger.warning(
+            "⚠  secret_key is still the insecure default — "
+            "future signing/token features would be compromised. "
+            "Set SECRET_KEY before deploying."
+        )
 
 
 def _seed_achievements() -> None:
@@ -94,6 +109,8 @@ def _start_scheduler() -> None:
             db = SessionLocal()
             try:
                 await generate_daily_motivation(db)
+            except Exception:
+                logger.exception("Scheduled daily motivation generation failed")
             finally:
                 db.close()
 
@@ -102,6 +119,8 @@ def _start_scheduler() -> None:
             try:
                 await generate_weekly_summary(db)
                 await generate_weekly_challenge(db)
+            except Exception:
+                logger.exception("Scheduled weekly summary/challenge generation failed")
             finally:
                 db.close()
 

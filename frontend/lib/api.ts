@@ -1,8 +1,12 @@
 /**
  * api.ts — Typed fetch wrapper for the PaceForge FastAPI backend.
  *
- * Credentials are stored in localStorage (username + password) and sent
- * as HTTP Basic auth on every request. Single-user app — no token refresh needed.
+ * Credentials are stored in localStorage and sent as HTTP Basic auth on
+ * every request.  NOTE: localStorage is accessible to any script running
+ * in the same origin — if XSS is introduced anywhere in the page the
+ * password would be exfiltrated.  For a single-user self-hosted app this
+ * is an acceptable trade-off, but migrating to an HttpOnly cookie or
+ * short-lived token would be a meaningful hardening step.
  */
 
 import type {
@@ -43,6 +47,10 @@ export function savePassword(password: string) {
   localStorage.setItem("paceforge-password", password);
 }
 
+export function clearPassword() {
+  localStorage.removeItem("paceforge-password");
+}
+
 // ── Core fetch ────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(
@@ -60,6 +68,9 @@ async function apiFetch<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      clearPassword();
+    }
     const body = await res.text().catch(() => "");
     throw new ApiError(res.status, body || res.statusText);
   }

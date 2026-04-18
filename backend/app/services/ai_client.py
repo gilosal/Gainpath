@@ -9,6 +9,7 @@ secondary model, and records every call to ai_usage_log.
 from __future__ import annotations
 
 import json
+import re
 import time
 import logging
 from typing import Type, TypeVar, Optional
@@ -30,12 +31,31 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-# Errors that are safe to retry (network blips, timeouts)
 _RETRYABLE = (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError)
+
+_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?\s*```$", re.DOTALL)
 
 
 class AIGenerationError(Exception):
     """Raised when all attempts (primary + fallback) fail."""
+
+
+class AIEmptyResponseError(AIGenerationError):
+    """Raised when the model returns an empty or whitespace-only response."""
+
+
+def strip_json_fences(text: str) -> str:
+    """Remove markdown code fences wrapping a JSON payload.
+
+    Some models return `````json\\n{...}\\n````` even when
+    ``response_format=json_object`` is requested. Stripping the fences
+    before ``json.loads`` prevents a ``JSONDecodeError``.
+    """
+    stripped = text.strip()
+    m = _FENCE_RE.match(stripped)
+    if m:
+        return m.group(1).strip()
+    return stripped
 
 
 class AIClient:
@@ -56,9 +76,11 @@ class AIClient:
         db=None,
         model_override: Optional[str] = None,
     ) -> str:
-        """
-        Generate a free-form text response (no structured JSON required).
-        Used for conversational coaching chat.
+        """Generate a free-form text response (no structured JSON required).
+
+        Retries transient network errors per model before falling back to
+        the secondary model. Returns non-empty text or raises.
+        Usage is logged for every attempt (success or failure).
         """
         primary = model_override or self.default_model
         models_to_try = [primary]
@@ -73,33 +95,15 @@ class AIClient:
             usage_data: dict = {}
             request_id: Optional[str] = None
             try:
-                headers = {
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://paceforge.local",
-                    "X-Title": "PaceForge",
-                }
-                payload = {
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.8,
-                }
-                async with httpx.AsyncClient(timeout=settings.ai_timeout) as client:
-                    resp = await client.post(
-                        f"{self.base_url}/chat/completions",
-                        headers=headers,
-                        json=payload,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    request_id = data.get("id")
-                    usage_data = data.get("usage", {})
-                    content = data["choices"][0]["message"]["content"]
-                    success = True
-                    return content
+                content, usage_data, request_id = await self._call_text_with_retry(
+                    model=model,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
+                if not content or not content.strip():
+                    raise AIEmptyResponseError(f"[{model}] Empty response from model")
+                success = True
+                return content
             except Exception as exc:
                 error_msg = str(exc)
                 last_exc = AIGenerationError(f"[{model}] {error_msg}")
@@ -131,11 +135,10 @@ class AIClient:
         db=None,
         model_override: Optional[str] = None,
     ) -> T:
-        """
-        Generate a structured AI response validated against *response_model*.
+        """Generate a structured AI response validated against *response_model*.
 
         Tries the primary model first; falls back to *ai_fallback_model* on
-        any non-retryable failure, then raises AIGenerationError if both fail.
+        any failure, then raises AIGenerationError if both fail.
         """
         primary = model_override or self.default_model
         models_to_try = [primary]
@@ -154,7 +157,7 @@ class AIClient:
                     db=db,
                     model=model,
                 )
-            except AIGenerationError as exc:
+            except Exception as exc:
                 logger.warning("Model %s failed: %s — trying next.", model, exc)
                 last_exc = exc
 
@@ -164,10 +167,10 @@ class AIClient:
 
     @retry(
         retry=retry_if_exception_type(_RETRYABLE),
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(settings.ai_max_retries),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         before_sleep=before_sleep_log(logger, logging.WARNING),
-        reraise=False,
+        reraise=True,
     )
     async def _call_with_retry(
         self,
@@ -191,18 +194,26 @@ class AIClient:
                 model=model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+                json_mode=True,
             )
             data = response.json()
             request_id = data.get("id")
             usage_data = data.get("usage", {})
 
             raw_content = data["choices"][0]["message"]["content"]
-            parsed_json = json.loads(raw_content)
+            if not raw_content or not raw_content.strip():
+                raise AIEmptyResponseError(f"[{model}] Empty response content from model")
+
+            cleaned = strip_json_fences(raw_content)
+            parsed_json = json.loads(cleaned)
             result = response_model.model_validate(parsed_json)
             success = True
             return result
 
-        except (httpx.HTTPStatusError, json.JSONDecodeError, ValidationError, KeyError) as exc:
+        except _RETRYABLE:
+            raise
+        except (AIGenerationError, httpx.HTTPStatusError,
+                json.JSONDecodeError, ValidationError, KeyError) as exc:
             error_msg = str(exc)
             raise AIGenerationError(f"[{model}] {error_msg}") from exc
 
@@ -220,12 +231,39 @@ class AIClient:
                 request_id=request_id,
             )
 
+    @retry(
+        retry=retry_if_exception_type(_RETRYABLE),
+        stop=stop_after_attempt(settings.ai_max_retries),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+        reraise=True,
+    )
+    async def _call_text_with_retry(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> tuple[str, dict, Optional[str]]:
+        response = await self._http_post(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            json_mode=False,
+        )
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        usage_data = data.get("usage", {})
+        request_id = data.get("id")
+        return content, usage_data, request_id
+
     async def _http_post(
         self,
         *,
         model: str,
         system_prompt: str,
         user_prompt: str,
+        json_mode: bool = True,
     ) -> httpx.Response:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -233,15 +271,19 @@ class AIClient:
             "HTTP-Referer": "https://paceforge.local",
             "X-Title": "PaceForge",
         }
-        payload = {
+        payload: dict = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.7,
-            "response_format": {"type": "json_object"},
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        else:
+            payload["temperature"] = 0.8
+
         async with httpx.AsyncClient(timeout=settings.ai_timeout) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -270,7 +312,6 @@ class AIClient:
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)
             total_tokens = usage.get("total_tokens", 0)
-            # OpenRouter may embed cost directly in usage
             cost_usd = float(usage.get("cost", 0.0))
 
             log = AIUsageLog(

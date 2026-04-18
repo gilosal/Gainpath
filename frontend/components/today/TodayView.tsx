@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { sessionsApi, plansApi, gamificationApi, coachingApi } from "@/lib/api";
+import { sessionsApi, gamificationApi, coachingApi } from "@/lib/api";
 import { todayISO, formatDate, sessionTypeColor, sessionTypeLabel, cn } from "@/lib/utils";
 import { PlanGeneratingSkeleton, SessionSkeletonCard } from "@/components/common/SkeletonCard";
 import { ActiveWorkout } from "./ActiveWorkout";
@@ -25,6 +25,7 @@ export function TodayView() {
   const qc = useQueryClient();
   const [activeSession, setActiveSession] = useState<SessionLog | null>(null);
   const [logSheet, setLogSheet] = useState<SessionLog | null>(null);
+  const [skipTarget, setSkipTarget] = useState<SessionLog | null>(null);
   const [newPRs, setNewPRs] = useState<PersonalRecord[]>([]);
   const [postWorkoutMsg, setPostWorkoutMsg] = useState<CoachingMessage | null>(null);
 
@@ -136,15 +137,36 @@ export function TodayView() {
             <SessionSkeletonCard />
           </>
         ) : sessions && sessions.length > 0 ? (
-          sessions.map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              onStart={() => setActiveSession(session)}
-              onQuickLog={() => setLogSheet(session)}
-              onSkip={() => skipMutation.mutate(session.id)}
-            />
-          ))
+          <>
+            {sessions.find((s) => s.status === "planned" || s.status === "in_progress") && (
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider px-1 mt-1">
+                Next up
+              </p>
+            )}
+            {sessions
+              .filter((s) => s.status !== "completed" && s.status !== "skipped")
+              .map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  onStart={() => setActiveSession(session)}
+                  onQuickLog={() => setLogSheet(session)}
+                  onSkip={() => setSkipTarget(session)}
+                />
+              ))}
+            {sessions.filter((s) => s.status === "completed" || s.status === "skipped").length > 0 && (
+              <>
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider px-1 pt-2">
+                  Done
+                </p>
+                {sessions
+                  .filter((s) => s.status === "completed" || s.status === "skipped")
+                  .map((session) => (
+                    <DoneCard key={session.id} session={session} />
+                  ))}
+              </>
+            )}
+          </>
         ) : (
           <RestDayCard />
         )}
@@ -160,6 +182,35 @@ export function TodayView() {
           open={!!logSheet}
           onClose={() => setLogSheet(null)}
         />
+      )}
+
+      {/* Skip confirmation */}
+      {skipTarget && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="bg-card rounded-2xl shadow-2xl p-6 max-w-sm w-full space-y-4">
+            <h3 className="text-lg font-bold text-foreground">Skip this session?</h3>
+            <p className="text-sm text-muted-foreground">
+              You can&apos;t undo this. The session will be marked as skipped and won&apos;t count toward your streak.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSkipTarget(null)}
+                className="flex-1 rounded-xl py-3 text-sm font-medium bg-secondary text-secondary-foreground touch-target active:scale-95 transition-transform"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  skipMutation.mutate(skipTarget.id);
+                  setSkipTarget(null);
+                }}
+                className="flex-1 rounded-xl py-3 text-sm font-medium bg-destructive text-destructive-foreground touch-target active:scale-95 transition-transform"
+              >
+                Skip
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* PR celebration overlay */}
@@ -188,78 +239,75 @@ function SessionCard({
 }) {
   const Icon = SESSION_ICONS[session.session_type] ?? Dumbbell;
   const colorClass = sessionTypeColor(session.session_type);
-  const isCompleted = session.status === "completed";
-  const isSkipped = session.status === "skipped";
 
   return (
-    <div
-      className={cn(
-        "rounded-xl border bg-card p-4 transition-all duration-200",
-        isCompleted ? "border-primary/40 opacity-75" : "border-border",
-        isSkipped && "opacity-50"
-      )}
-    >
+    <div className="rounded-xl border border-border bg-card p-4 transition-all duration-200">
       <div className="flex items-start gap-3">
-        {/* Icon badge */}
         <div className={cn("p-2.5 rounded-lg flex-shrink-0 border", colorClass)}>
           <Icon size={18} />
         </div>
-
-        {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-foreground text-sm leading-tight truncate">
-              {sessionTypeLabel(session.session_type)} Session
-            </h3>
-            {isCompleted && <CheckCircle2 size={15} className="text-primary flex-shrink-0" />}
-          </div>
+          <h3 className="font-semibold text-foreground text-sm leading-tight truncate">
+            {sessionTypeLabel(session.session_type)} Session
+          </h3>
           <p className="text-xs text-muted-foreground mt-0.5">
             {session.session_type === "running" && session.actual_distance
               ? `${session.actual_distance} km logged`
               : session.session_type === "lifting" && session.total_tonnage
               ? `${session.total_tonnage.toFixed(0)} kg total`
-              : "Tap to start"}
+              : "Ready to go"}
           </p>
         </div>
-
-        {/* Status badge */}
-        {isCompleted && (
-          <span className="text-xs font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full flex-shrink-0">
-            Done
-          </span>
-        )}
-        {isSkipped && (
-          <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full flex-shrink-0">
-            Skipped
-          </span>
-        )}
       </div>
+      <div className="flex gap-2 mt-3 pt-3 border-t border-border">
+        <button
+          onClick={onStart}
+          className="flex-1 flex items-center justify-center gap-1.5 bg-primary text-primary-foreground rounded-lg py-2.5 text-sm font-semibold touch-target transition-transform active:scale-95"
+        >
+          <Play size={15} fill="currentColor" />
+          Start
+        </button>
+        <button
+          onClick={onQuickLog}
+          className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground rounded-lg px-3 py-2.5 text-sm font-medium touch-target transition-transform active:scale-95"
+        >
+          <Plus size={15} />
+          Log
+        </button>
+        <button
+          onClick={onSkip}
+          className="flex items-center justify-center text-muted-foreground rounded-lg px-3 py-2.5 touch-target transition-transform active:scale-95"
+          aria-label="Skip session"
+        >
+          <SkipForward size={15} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
-      {/* Actions — only show if not done/skipped */}
-      {!isCompleted && !isSkipped && (
-        <div className="flex gap-2 mt-3 pt-3 border-t border-border">
-          <button
-            onClick={onStart}
-            className="flex-1 flex items-center justify-center gap-1.5 bg-primary text-primary-foreground rounded-lg py-2.5 text-sm font-semibold touch-target transition-transform active:scale-95"
-          >
-            <Play size={15} fill="currentColor" />
-            Start
-          </button>
-          <button
-            onClick={onQuickLog}
-            className="flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground rounded-lg px-3 py-2.5 text-sm font-medium touch-target transition-transform active:scale-95"
-          >
-            <Plus size={15} />
-            Log
-          </button>
-          <button
-            onClick={onSkip}
-            className="flex items-center justify-center text-muted-foreground rounded-lg px-3 py-2.5 touch-target transition-transform active:scale-95"
-            aria-label="Skip session"
-          >
-            <SkipForward size={15} />
-          </button>
-        </div>
+function DoneCard({ session }: { session: SessionLog }) {
+  const Icon = SESSION_ICONS[session.session_type] ?? Dumbbell;
+  const colorClass = sessionTypeColor(session.session_type);
+  const isCompleted = session.status === "completed";
+
+  return (
+    <div
+      className={cn(
+        "rounded-xl border bg-card/60 px-4 py-2.5 flex items-center gap-3",
+        isCompleted ? "border-primary/30" : "border-border opacity-60"
+      )}
+    >
+      <div className={cn("p-1.5 rounded-md flex-shrink-0 border", colorClass)}>
+        <Icon size={14} />
+      </div>
+      <span className="flex-1 text-sm text-muted-foreground truncate">
+        {sessionTypeLabel(session.session_type)} Session
+      </span>
+      {isCompleted ? (
+        <CheckCircle2 size={15} className="text-primary flex-shrink-0" />
+      ) : (
+        <span className="text-xs text-muted-foreground">Skipped</span>
       )}
     </div>
   );

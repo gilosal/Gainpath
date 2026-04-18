@@ -1,0 +1,25 @@
+configVersion = "2.1"
+maxIterations = 10
+iterationDelay = 1500
+autoCommit = false
+agent = "opencode"
+command = "opencode"
+tracker = "json"
+subagentTracingDetail = "moderate"
+prompt_template = ".ralph-tui/gainpath-prompt.hbs"
+
+[agentOptions]
+model = "ollama-cloud/glm-5.1"
+agent = "build"
+
+[trackerOptions]
+path = "./tasks/prd.json"
+
+[errorHandling]
+strategy = "abort"
+maxRetries = 1
+retryDelayMs = 5000
+continueOnNonZeroExit = false
+
+[parallel]
+mode = "never"

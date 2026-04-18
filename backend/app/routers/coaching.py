@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import get_db
+from ..database import get_db, SessionLocal
 from ..models.coaching import CoachingMessage, ChatMessage
 from ..services import coaching_engine
 
@@ -114,22 +114,52 @@ def mark_displayed(message_id: UUID, db: Session = Depends(get_db)):
     db.commit()
 
 
+async def _run_daily_motivation() -> None:
+    db = SessionLocal()
+    try:
+        await coaching_engine.generate_daily_motivation(db)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Daily motivation background task failed")
+    finally:
+        db.close()
+
+
+async def _run_weekly_summary() -> None:
+    db = SessionLocal()
+    try:
+        await coaching_engine.generate_weekly_summary(db)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Weekly summary background task failed")
+    finally:
+        db.close()
+
+
+async def _run_post_workout(session_id: UUID, xp_earned: int) -> None:
+    db = SessionLocal()
+    try:
+        await coaching_engine.generate_post_workout_feedback(db, session_id, xp_earned)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Post-workout coaching background task failed")
+    finally:
+        db.close()
+
+
 @router.post("/generate/daily", status_code=202)
 def trigger_daily_motivation(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
-    """Trigger daily motivation generation (normally called by scheduler)."""
-    background_tasks.add_task(coaching_engine.generate_daily_motivation, db)
+    background_tasks.add_task(_run_daily_motivation)
     return {"status": "queued"}
 
 
 @router.post("/generate/weekly-summary", status_code=202)
 def trigger_weekly_summary(
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
-    background_tasks.add_task(coaching_engine.generate_weekly_summary, db)
+    background_tasks.add_task(_run_weekly_summary)
     return {"status": "queued"}
 
 
@@ -137,9 +167,8 @@ def trigger_weekly_summary(
 def trigger_post_workout(
     session_id: UUID,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
 ):
-    background_tasks.add_task(coaching_engine.generate_post_workout_feedback, db, session_id, 0)
+    background_tasks.add_task(_run_post_workout, session_id, 0)
     return {"status": "queued"}
 
 
@@ -173,7 +202,6 @@ async def send_chat_message(
 ):
     response_text = await coaching_engine.chat(db, payload.message)
 
-    # Fetch the two most recently stored messages
     recent = (
         db.query(ChatMessage)
         .order_by(ChatMessage.created_at.desc())

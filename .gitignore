@@ -23,6 +23,7 @@ node_modules/
 out/
 frontend/.next/
 frontend/out/
+*.tsbuildinfo
 
 # Database
 *.sqlite3
@@ -42,3 +43,9 @@ logs/
 
 # Docker volumes (local bind mounts)
 postgres_data/
+
+# Ralph TUI runtime artifacts
+.ralph-tui/iterations/
+.ralph-tui/*.lock
+.ralph-tui/session*.json
+.ralph-tui/registry.json
