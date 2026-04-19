@@ -15,7 +15,7 @@ export function ChatInterface() {
 
   const { data: history = [], isLoading } = useQuery({
     queryKey: ["coaching", "chat"],
-    queryFn: coachingApi.chatHistory,
+    queryFn: () => coachingApi.chatHistory(),
     staleTime: 0,
   });
 
