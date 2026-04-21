@@ -1,134 +1,159 @@
 {
-  "name": "Gainpath Execution Backlog",
-  "description": "Actionable Ralph backlog for improving Gainpath across security, UX, architecture, session reliability, and AI behavior.",
+  "name": "Gainpath Loop 2 — Short-Term Fixes from Architecture Review",
+  "description": "Actionable backlog derived from US-005 architecture review and US-001 security review findings. Targets the highest-impact short-term fixes across input validation, CORS safety, offline sync, AI client efficiency, and frontend error handling.",
   "branchName": "master",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "Harden auth and configuration defaults",
-      "description": "Remove insecure default behavior around Basic auth, password handling, and backend configuration so the app fails safely in local and deployed environments.",
+      "id": "US-101",
+      "title": "Add field-level validation and status transition guards to Pydantic schemas",
+      "description": "Multiple endpoints spread payload.model_dump() into setattr() loops without range validation, allowed-value constraints, or immutable-field protection. Add explicit constraints to SessionLogUpdate (allowed status transitions, immutable id), SessionLogCreate (session_type enum), and UserProfileUpdate. Add a status transition validator so you can't go from 'completed' back to 'planned'.",
       "acceptanceCriteria": [
-        "Security-sensitive defaults in backend configuration are reviewed and tightened where practical.",
-        "Authentication flow between frontend and backend is reviewed for obvious weaknesses, especially localStorage password handling and proxy behavior.",
-        "At least one concrete hardening improvement is implemented, and any remaining risks are documented."
+        "SessionLogUpdate.status uses Literal['planned','in_progress','completed','skipped'] or an enum, not Optional[str].",
+        "SessionLogCreate.session_type uses an enum or Literal type with allowed values.",
+        "A status transition validator prevents invalid transitions (e.g. completed → planned).",
+        "The 'id' field is excluded from all setattr() update loops.",
+        "Existing tests still pass or are updated to match new validation."
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "dependsOn": [],
-      "labels": [
-        "security",
-        "backend",
-        "frontend"
-      ],
-      "completionNotes": "Completed by agent"
+      "labels": ["security", "backend", "validation"]
     },
     {
-      "id": "US-002",
-      "title": "Stabilize session completion side effects",
-      "description": "Review and improve the workflow that runs when a session is completed, with emphasis on background task safety, DB/session lifecycle correctness, and predictable user-visible results.",
+      "id": "US-102",
+      "title": "Validate CORS origins at startup — reject wildcard in production",
+      "description": "Currently cors_origins defaults to localhost and if misconfigured to ['*'] in production, the API accepts calls from any origin. Since auth is HTTP Basic, this would leak credentials. Add startup validation that rejects ['*'] when APP_ENV != 'development'.",
       "acceptanceCriteria": [
-        "The completion flow in the sessions router and downstream services is reviewed end to end.",
-        "At least one concrete reliability issue in the completion pipeline is fixed.",
-        "The change preserves or improves PR detection, streak/XP updates, and post-workout coaching behavior."
+        "Startup validation in config.py rejects CORS_ORIGINS containing '*' when APP_ENV is not 'development'.",
+        "A clear error message explains why wildcard CORS is forbidden in production.",
+        "Development mode still allows any CORS configuration for local ergonomics."
       ],
       "priority": 1,
-      "passes": true,
+      "passes": false,
       "dependsOn": [],
-      "labels": [
-        "backend",
-        "reliability",
-        "feature"
-      ],
-      "completionNotes": "Completed by agent"
+      "labels": ["security", "backend"]
     },
     {
-      "id": "US-003",
-      "title": "Improve the Today flow for mobile-first usability",
-      "description": "Refine the main Today experience so it feels more intentional, faster to act on, and clearer for session start, quick log, skip, and post-workout flows.",
+      "id": "US-103",
+      "title": "Add Pydantic models for offline sync payloads and validate before ORM insertion",
+      "description": "The offline sync endpoint's _apply_action spreads arbitrary payload.items() directly into ORM models. Add explicit Pydantic models (CreateSetLogPayload, CompleteSessionPayload, AddBodyFeedbackPayload) and validate incoming payloads against them before touching the database. Exclude the 'id' field from complete_session setattr loop.",
       "acceptanceCriteria": [
-        "The Today flow receives at least one material UX improvement in the main interaction path.",
-        "The updated surface remains coherent on both mobile and desktop.",
-        "No existing session actions regress."
+        "Each offline action type has a dedicated Pydantic model that validates payload shape.",
+        "_apply_action validates payloads against the correct model before ORM insertion.",
+        "The 'id' field is excluded from the complete_session setattr loop.",
+        "Invalid or unknown payload keys are rejected with a 422 response."
+      ],
+      "priority": 1,
+      "passes": false,
+      "dependsOn": ["US-101"],
+      "labels": ["security", "backend", "offline"]
+    },
+    {
+      "id": "US-104",
+      "title": "Reuse httpx.AsyncClient across AI calls instead of creating per request",
+      "description": "AIClient._http_post creates a new httpx.AsyncClient per call, discarding it after one request. This means TCP+TLS setup happens per AI call. Create the client once in __init__ or as a managed singleton, reuse it across calls, and add a close() method for graceful shutdown.",
+      "acceptanceCriteria": [
+        "httpx.AsyncClient is created once in AIClient.__init__ and reused across calls.",
+        "A close() or shutdown method is available for graceful cleanup.",
+        "The client uses appropriate timeout and connection pool limits.",
+        "AI client tests pass or are updated for the new lifecycle."
       ],
       "priority": 2,
-      "passes": true,
-      "dependsOn": [
-        "US-002"
-      ],
-      "labels": [
-        "ui",
-        "frontend",
-        "mobile"
-      ],
-      "completionNotes": "Completed by agent"
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["backend", "ai", "performance"]
     },
     {
-      "id": "US-004",
-      "title": "Audit and harden AI client fallback behavior",
-      "description": "Improve the AI service layer and coaching endpoints so timeouts, invalid JSON, provider failures, and empty responses degrade in a predictable and debuggable way.",
+      "id": "US-105",
+      "title": "Fix coaching chat orphan message bug",
+      "description": "coaching_engine.chat() stores the user message and commits before calling the AI model. If the AI call fails, the user message is committed but has no assistant row. The except block stores a fallback string so it's not catastrophic, but the two-message chat contract is fragile. Store both messages in a single transaction: generate the AI response first, then commit user + assistant together.",
       "acceptanceCriteria": [
-        "AI client request, retry, and fallback behavior is reviewed in code.",
-        "At least one concrete guardrail or failure-path improvement is implemented.",
-        "Usage logging remains functional for both success and failure cases."
+        "User and assistant messages are committed together in a single db.commit() when AI succeeds.",
+        "On AI failure, the fallback assistant message is still stored alongside the user message in the same commit.",
+        "No orphan user-message rows are possible after any code path.",
+        "Existing coaching endpoint behavior is preserved."
       ],
       "priority": 2,
-      "passes": true,
-      "dependsOn": [
-        "US-001"
-      ],
-      "labels": [
-        "ai",
-        "backend",
-        "reliability"
-      ],
-      "completionNotes": "Completed by agent"
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["backend", "ai", "reliability"]
     },
     {
-      "id": "US-005",
-      "title": "Produce an architecture review with prioritized debt map",
-      "description": "Create a concise architecture review covering frontend boundaries, backend layering, data flow, auth boundaries, and deployment assumptions, with practical next steps.",
+      "id": "US-106",
+      "title": "Add Content-Security-Policy and security headers to proxy responses",
+      "description": "The Next.js proxy route strips WWW-Authenticate but doesn't add any security headers. Add Content-Security-Policy, X-Content-Type-Options, X-Frame-Options, and Referrer-Policy headers to all proxied responses to harden against XSS and clickjacking.",
       "acceptanceCriteria": [
-        "A review document is created under `.ralph-tui/reviews/US-005.md`.",
-        "The review includes severity-ranked findings tied to specific files or modules.",
-        "Recommendations distinguish short-term fixes from medium-term refactors."
+        "Proxy route adds Content-Security-Policy header with sensible defaults (script-src, style-src, etc.).",
+        "X-Content-Type-Options: nosniff is set on all proxy responses.",
+        "X-Frame-Options: DENY or SAMEORIGIN is set.",
+        "Referrer-Policy: strict-origin-when-cross-origin is set.",
+        "Headers do not break normal app functionality (API calls, AI coaching, offline sync)."
       ],
       "priority": 2,
-      "passes": true,
-      "dependsOn": [
-        "US-001",
-        "US-002"
-      ],
-      "labels": [
-        "architecture",
-        "review"
-      ],
-      "completionNotes": "Completed by agent"
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["security", "frontend"]
     },
     {
-      "id": "US-006",
-      "title": "Add focused verification for critical flows",
-      "description": "Add pragmatic verification around the highest-risk backend and frontend areas touched by the earlier stories using test files, static validation, and explicit review notes. Do not block on local runtime setup or full local app testing.",
+      "id": "US-107",
+      "title": "Add frontend error state handling and error boundary convention",
+      "description": "useQuery calls handle loading with skeleton cards but have no error state rendering. useMutation hooks have no onError callback. Add error state rendering to critical query hooks (sessions, coaching, dashboard) with retry buttons or toast notifications. Add an ErrorBoundary component wrapping the app.",
       "acceptanceCriteria": [
-        "At least one critical backend path and one critical frontend path gain meaningful verification through automated tests, focused file-level validation, or explicit review notes.",
-        "Verification targets the real flows changed by earlier stories rather than generic coverage expansion.",
-        "If local test execution or local runtime verification is unavailable, the task still completes by documenting what was verified statically and what local checks were intentionally skipped.",
-        "The result improves confidence without trying to build exhaustive test coverage or requiring a working local environment."
+        "Critical useQuery hooks in TodayView and ActiveWorkout render an error state when the API fails.",
+        "useMutation hooks for session complete/skip have onError callbacks with user-visible feedback (toast or inline).",
+        "An ErrorBoundary component catches render crashes and shows a recovery UI.",
+        "Error states preserve the existing visual language."
+      ],
+      "priority": 2,
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["ui", "frontend", "reliability"]
+    },
+    {
+      "id": "US-108",
+      "title": "Migrate FastAPI startup/shutdown to lifespan context manager",
+      "description": "The scheduler uses the deprecated @app.on_event('startup') pattern and has no graceful shutdown. Migrate to the lifespan context manager pattern, storing the scheduler instance and calling scheduler.shutdown() on exit. This also enables proper httpx client cleanup from US-104.",
+      "acceptanceCriteria": [
+        "The deprecated on_event('startup') is replaced with a lifespan context manager.",
+        "The AsyncIOScheduler is started in lifespan startup and shut down in lifespan shutdown.",
+        "The lifespan also manages the AIClient httpx client lifecycle if applicable.",
+        "App behavior is unchanged — scheduler runs the same jobs.",
+        "Graceful shutdown no longer hangs."
       ],
       "priority": 3,
-      "passes": true,
-      "dependsOn": [
-        "US-002",
-        "US-003",
-        "US-004"
+      "passes": false,
+      "dependsOn": ["US-104"],
+      "labels": ["backend", "architecture"]
+    },
+    {
+      "id": "US-109",
+      "title": "Replace datetime.utcnow() with datetime.now(timezone.utc) across all files",
+      "description": "Multiple files use datetime.utcnow() which is deprecated in Python 3.12+. Replace all instances with datetime.now(timezone.utc). Optionally create a shared now_utc() helper.",
+      "acceptanceCriteria": [
+        "No remaining calls to datetime.utcnow() in the backend codebase.",
+        "All replacements use datetime.now(timezone.utc) or a shared now_utc() helper.",
+        "A shared utility function exists if more than 3 files needed the change.",
+        "Backend tests pass or are updated."
       ],
-      "labels": [
-        "testing",
-        "quality"
+      "priority": 3,
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["backend", "quality"]
+    },
+    {
+      "id": "US-110",
+      "title": "Replace hardcoded PaceForge branding with settings.app_name",
+      "description": "The AI client X-Title header and some backend references are hardcoded to 'PaceForge'. Replace them with settings.app_name so the product name can be changed from config. Also update the localStorage key prefix if practical.",
+      "acceptanceCriteria": [
+        "AI client X-Title header uses settings.app_name instead of hardcoded 'PaceForge'.",
+        "Backend health endpoint app name uses settings.app_name.",
+        "Frontend localStorage key is documented as a known migration item if changed.",
+        "All existing tests pass or are updated."
       ],
-      "completionNotes": "Completed by agent"
+      "priority": 3,
+      "passes": false,
+      "dependsOn": [],
+      "labels": ["backend", "frontend", "quality"]
     }
-  ],
-  "metadata": {
-    "updatedAt": "2026-04-18T16:55:28.223Z"
-  }
+  ]
 }
