@@ -33,3 +33,15 @@ after each iteration and it's included in prompts for context.
 
 ### All 129 tests pass ✓
 
+---
+
+## US-102: Validate CORS origins at startup — reject wildcard in production — COMPLETED
+
+### Files Changed
+- `backend/app/main.py` — Extended `_check_insecure_config()` to validate CORS origins at startup
+
+### Validation Added
+1. **Wildcard CORS rejection**: If `CORS_ORIGINS` contains `'*'` and `APP_ENV != 'development'`, app raises `ValueError` at startup with a clear message explaining the security risk (exposes HTTP Basic credentials)
+2. **Dev-mode warning**: If `APP_ENV == 'development'` and CORS has `'*'`, a warning is logged instead (local ergonomics preserved)
+3. **app_password default hardened**: Also raises `ValueError` in non-development environments (matching config.py validator)
+
