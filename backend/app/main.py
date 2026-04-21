@@ -69,14 +69,32 @@ async def startup() -> None:
 
 
 def _check_insecure_config() -> None:
+    import os
+    env = os.getenv("APP_ENV", "development")
     if settings.app_password == "changeme":
+        if env != "development":
+            raise ValueError(
+                "app_password must be changed from the default in non-development "
+                "environments. Set APP_PASSWORD in your environment or .env file."
+            )
         logger.warning(
-            "⚠  app_password is still the default 'changeme' — "
-            "anyone can access this instance. Set APP_PASSWORD before deploying."
+            "app_password is set to the insecure default 'changeme'. "
+            "Set APP_PASSWORD in your environment or .env file before deploying."
+        )
+    if "*" in settings.cors_origins:
+        if env != "development":
+            raise ValueError(
+                "CORS_ORIGINS contains '*' (wildcard) which is forbidden in non-development "
+                "environments. This would allow requests from any origin, exposing HTTP Basic "
+                "credentials. Set specific origins in CORS_ORIGINS or set APP_ENV=development."
+            )
+        logger.warning(
+            "CORS_ORIGINS contains '*' (wildcard) — this allows requests from any origin. "
+            "Configure specific origins for production. Set APP_ENV=development to suppress this warning."
         )
     if settings.secret_key == "changeme-secret-key-32chars-minimum":
         logger.warning(
-            "⚠  secret_key is still the insecure default — "
+            "secret_key is still the insecure default — "
             "future signing/token features would be compromised. "
             "Set SECRET_KEY before deploying."
         )
