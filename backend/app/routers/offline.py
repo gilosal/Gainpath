@@ -84,7 +84,7 @@ def _apply_action(item: OfflineQueue, db: Session) -> None:
         if not log:
             raise ValueError(f"SessionLog {session_id} not found")
         for k, v in payload.items():
-            if k != "session_log_id" and hasattr(log, k):
+            if k not in ("session_log_id", "id") and hasattr(log, k):
                 setattr(log, k, v)
 
     elif action == "add_body_feedback":

@@ -8,7 +8,11 @@ import pytest
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-from app.schemas.session import SessionLogUpdate, BodyFeedbackCreate, SetLogCreate
+from app.schemas.session import (
+    SessionLogUpdate, BodyFeedbackCreate, SetLogCreate,
+    SessionStatus, SessionType, SetType, Feeling,
+    VALID_STATUS_TRANSITIONS, validate_status_transition,
+)
 
 
 class TestSessionLogUpdateSchema:
@@ -16,9 +20,9 @@ class TestSessionLogUpdateSchema:
     mutation endpoint. Validates that the schema enforces constraints."""
 
     def test_status_only_update(self):
-        payload = SessionLogUpdate(status="completed")
+        payload = SessionLogUpdate(status=SessionStatus.completed)
         data = payload.model_dump(exclude_unset=True)
-        assert data == {"status": "completed"}
+        assert data["status"] == SessionStatus.completed
         assert "started_at" not in data
         assert "notes" not in data
 
@@ -33,15 +37,15 @@ class TestSessionLogUpdateSchema:
     def test_completed_at_is_optional(self):
         """The backend auto-sets completed_at when status transitions
         to 'completed' (US-002 fix)."""
-        payload = SessionLogUpdate(status="completed")
+        payload = SessionLogUpdate(status=SessionStatus.completed)
         assert payload.completed_at is None
 
     def test_severity_validation_range(self):
         with pytest.raises(Exception):
-            BodyFeedbackCreate(body_area="knees", feeling="tight", severity=0)
+            BodyFeedbackCreate(body_area="knees", feeling=Feeling.tight, severity=0)
         with pytest.raises(Exception):
-            BodyFeedbackCreate(body_area="knees", feeling="tight", severity=6)
-        fb = BodyFeedbackCreate(body_area="knees", feeling="tight", severity=3)
+            BodyFeedbackCreate(body_area="knees", feeling=Feeling.tight, severity=6)
+        fb = BodyFeedbackCreate(body_area="knees", feeling=Feeling.tight, severity=3)
         assert fb.severity == 3
 
     def test_set_log_rpe_validation_range(self):
@@ -53,9 +57,38 @@ class TestSessionLogUpdateSchema:
         assert s.rpe == 8
 
     def test_status_field_allows_expected_values(self):
-        for status in ("planned", "in_progress", "completed", "skipped"):
+        for status in SessionStatus:
             payload = SessionLogUpdate(status=status)
             assert payload.status == status
+
+    def test_status_field_rejects_invalid_value(self):
+        with pytest.raises(Exception):
+            SessionLogUpdate(status="not_a_status")
+
+    def test_session_type_uses_enum(self):
+        for st in SessionType:
+            from app.schemas.session import SessionLogCreate
+            obj = SessionLogCreate(session_date="2025-01-01", session_type=st)
+            assert obj.session_type == st
+
+    def test_session_type_rejects_invalid_value(self):
+        with pytest.raises(Exception):
+            from app.schemas.session import SessionLogCreate
+            SessionLogCreate(session_date="2025-01-01", session_type="swimming")
+
+    def test_feeling_uses_enum(self):
+        for f in Feeling:
+            fb = BodyFeedbackCreate(body_area="knees", feeling=f)
+            assert fb.feeling == f
+
+    def test_feeling_rejects_invalid_value(self):
+        with pytest.raises(Exception):
+            BodyFeedbackCreate(body_area="knees", feeling="amazing")
+
+    def test_set_type_uses_enum(self):
+        for st in SetType:
+            s = SetLogCreate(exercise_name="squat", set_type=st)
+            assert s.set_type == st
 
     def test_notes_field_accepts_text(self):
         payload = SessionLogUpdate(notes="Felt strong today")
@@ -68,6 +101,41 @@ class TestSessionLogUpdateSchema:
     def test_actual_duration_is_int_seconds(self):
         payload = SessionLogUpdate(actual_duration=1800)
         assert payload.actual_duration == 1800
+
+
+class TestStatusTransitionValidator:
+    """Validate that status transition guards prevent invalid transitions
+    (US-101)."""
+
+    def test_valid_transition_planned_to_in_progress(self):
+        validate_status_transition("planned", SessionStatus.in_progress)
+
+    def test_valid_transition_planned_to_skipped(self):
+        validate_status_transition("planned", SessionStatus.skipped)
+
+    def test_valid_transition_in_progress_to_completed(self):
+        validate_status_transition("in_progress", SessionStatus.completed)
+
+    def test_valid_transition_in_progress_to_skipped(self):
+        validate_status_transition("in_progress", SessionStatus.skipped)
+
+    def test_invalid_transition_completed_to_planned(self):
+        with pytest.raises(ValueError, match="Invalid status transition"):
+            validate_status_transition("completed", SessionStatus.planned)
+
+    def test_invalid_transition_completed_to_in_progress(self):
+        with pytest.raises(ValueError, match="Invalid status transition"):
+            validate_status_transition("completed", SessionStatus.in_progress)
+
+    def test_invalid_transition_skipped_to_completed(self):
+        with pytest.raises(ValueError, match="Invalid status transition"):
+            validate_status_transition("skipped", SessionStatus.completed)
+
+    def test_valid_transition_skipped_to_planned(self):
+        validate_status_transition("skipped", SessionStatus.planned)
+
+    def test_unknown_current_status_allows_any_transition(self):
+        validate_status_transition("unknown_status", SessionStatus.completed)
 
 
 class TestSessionCompletionContract:
@@ -133,8 +201,6 @@ class TestOfflineSyncApplyAction:
             item.action_type = action
             item.payload = {"session_log_id": str(uuid4())}
             db = MagicMock()
-            # These will fail at the DB lookup stage, but should NOT raise
-            # "Unknown action type" — they should get past the type check.
             try:
                 _apply_action(item, db)
             except ValueError as e:
@@ -147,8 +213,38 @@ class TestOfflineSyncApplyAction:
         import inspect
         from app.routers.offline import _apply_action
         source = inspect.getsource(_apply_action)
-        # The complete_session branch uses setattr with payload keys
         assert "setattr" in source
+
+    def test_complete_session_excludes_id_from_setattr(self):
+        """US-101: The 'id' field must be excluded from the
+        complete_session setattr loop."""
+        import inspect
+        from app.routers.offline import _apply_action
+        source = inspect.getsource(_apply_action)
+        assert '"id"' in source or "'id'" in source
+
+
+class TestSetattrExcludesId:
+    """US-101: Verify that the 'id' field is excluded from all setattr()
+    update loops in the session and profile routers."""
+
+    def test_update_session_excludes_id(self):
+        import inspect
+        from app.routers.sessions import update_session
+        source = inspect.getsource(update_session)
+        assert 'pop("id"' in source or "pop('id'" in source
+
+    def test_update_set_excludes_id(self):
+        import inspect
+        from app.routers.sessions import update_set
+        source = inspect.getsource(update_set)
+        assert 'pop("id"' in source or "pop('id'" in source
+
+    def test_update_profile_excludes_id(self):
+        import inspect
+        from app.routers.profile import update_profile
+        source = inspect.getsource(update_profile)
+        assert 'pop("id"' in source or "pop('id'" in source
 
 
 class TestChatEndpointSchema:

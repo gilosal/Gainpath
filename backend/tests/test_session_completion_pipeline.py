@@ -11,7 +11,7 @@ from datetime import datetime, date
 from unittest.mock import MagicMock, patch, AsyncMock
 
 from app.routers.sessions import _on_session_completed, update_session
-from app.schemas.session import SessionLogUpdate
+from app.schemas.session import SessionLogUpdate, SessionStatus
 
 
 class TestOnSessionCompletedDBSessionIsolation:
@@ -100,16 +100,24 @@ class TestUpdateSessionEndpoint:
         assert "setattr" in source
         assert "exclude_unset=True" in source
 
+    def test_excludes_id_from_setattr_loop(self):
+        """US-101: The 'id' field must be excluded from update loops."""
+        source = inspect.getsource(update_session)
+        assert 'pop("id"' in source or "pop('id'" in source
+
 
 class TestSessionLogUpdateSchemaConstraints:
     """Verify the PATCH schema enforces field-level constraints to prevent
     invalid data from reaching the ORM layer."""
 
     def test_status_must_be_recognized(self):
-        valid = ["planned", "in_progress", "completed", "skipped"]
-        for s in valid:
+        for s in SessionStatus:
             payload = SessionLogUpdate(status=s)
             assert payload.status == s
+
+    def test_status_rejects_invalid_string(self):
+        with pytest.raises(Exception):
+            SessionLogUpdate(status="not_a_status")
 
     def test_rpe_range_enforced(self):
         with pytest.raises(Exception):
@@ -124,7 +132,7 @@ class TestSessionLogUpdateSchemaConstraints:
     def test_exclude_unset_prevents_overwriting_unspecified_fields(self):
         """SessionLogUpdate(status="completed").model_dump(exclude_unset=True)
         should only contain 'status', not null out started_at or notes."""
-        payload = SessionLogUpdate(status="completed")
+        payload = SessionLogUpdate(status=SessionStatus.completed)
         data = payload.model_dump(exclude_unset=True)
         assert set(data.keys()) == {"status"}
         assert "started_at" not in data

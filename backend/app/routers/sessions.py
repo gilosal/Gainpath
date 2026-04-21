@@ -14,6 +14,7 @@ from ..schemas.session import (
     SessionLogCreate, SessionLogUpdate, SessionLogRead,
     SetLogCreate, SetLogRead,
     BodyFeedbackCreate, BodyFeedbackRead,
+    SessionStatus, validate_status_transition,
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -153,7 +154,14 @@ async def update_session(
         raise HTTPException(404, "Session not found")
 
     was_completed = log.status == "completed"
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    if payload.status is not None:
+        try:
+            validate_status_transition(log.status, payload.status)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+    update_data = payload.model_dump(exclude_unset=True)
+    update_data.pop("id", None)
+    for field, value in update_data.items():
         setattr(log, field, value)
 
     if not was_completed and log.status == "completed":
@@ -202,7 +210,9 @@ def update_set(session_id: UUID, set_id: UUID, payload: SetLogCreate, db: Sessio
     ).first()
     if not set_log:
         raise HTTPException(404, "Set not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    update_data.pop("id", None)
+    for field, value in update_data.items():
         setattr(set_log, field, value)
     db.commit()
     db.refresh(set_log)

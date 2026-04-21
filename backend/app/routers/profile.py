@@ -27,7 +27,9 @@ def get_profile(db: Session = Depends(get_db)):
 @router.put("", response_model=UserProfileRead)
 def update_profile(payload: UserProfileUpdate, db: Session = Depends(get_db)):
     profile = _get_or_create_profile(db)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    update_data = payload.model_dump(exclude_unset=True)
+    update_data.pop("id", None)
+    for field, value in update_data.items():
         setattr(profile, field, value)
     db.commit()
     db.refresh(profile)

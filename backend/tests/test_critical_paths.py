@@ -18,7 +18,7 @@ from datetime import date, datetime
 from unittest.mock import MagicMock, patch, AsyncMock
 from uuid import uuid4
 
-from app.schemas.session import SessionLogCreate, SessionLogUpdate, SetLogCreate
+from app.schemas.session import SessionLogCreate, SessionLogUpdate, SetLogCreate, SessionStatus, SessionType
 from app.routers.sessions import _on_session_completed, update_session
 from app.routers.offline import _apply_action
 from app.services.ai_client import AIClient, strip_json_fences, _RETRYABLE
@@ -77,30 +77,24 @@ class TestSessionCompletionPipelineCriticalPath:
 # ── US-002 / US-005: Schema validation at ORM boundary ─────────────────────────
 
 class TestSessionLogUpdateStatusConstraint:
-    """SessionLogUpdate.status is Optional[str] with no enum constraint.
-    Any string passes Pydantic and gets setattr'd onto the ORM model.
-    This documents the gap and provides a regression test when a constraint
-    is eventually added."""
+    """SessionLogUpdate.status uses SessionStatus enum (US-101 fix).
+    Only valid status values are accepted, and invalid strings are rejected."""
 
     def test_status_accepts_valid_values(self):
-        for status in ("planned", "in_progress", "completed", "skipped"):
+        for status in SessionStatus:
             payload = SessionLogUpdate(status=status)
             assert payload.status == status
 
-    def test_status_accepts_arbitrary_string_no_constraint(self):
-        """BUG DOCUMENTED: No enum constraint on status field. Any string
-        passes through to setattr on the ORM model. This test documents
-        the gap so we know when it gets fixed."""
-        payload = SessionLogUpdate(status="hacked_status")
-        assert payload.status == "hacked_status"
-        # When a constraint is added, this test should be updated to
-        # assert that ValidationError is raised instead.
+    def test_status_rejects_arbitrary_string(self):
+        """US-101 FIX: SessionStatus enum now rejects invalid values."""
+        with pytest.raises(Exception):
+            SessionLogUpdate(status="hacked_status")
 
     def test_exclude_unset_on_status_update_does_not_leak_other_fields(self):
         """Updating only status should not null out other fields."""
-        payload = SessionLogUpdate(status="completed")
+        payload = SessionLogUpdate(status=SessionStatus.completed)
         data = payload.model_dump(exclude_unset=True)
-        assert data == {"status": "completed"}
+        assert "status" in data
         assert "started_at" not in data
         assert "completed_at" not in data
         assert "overall_rpe" not in data
@@ -119,17 +113,21 @@ class TestSessionLogCreateConstraints:
 
     def test_requires_session_date(self):
         with pytest.raises(Exception):
-            SessionLogCreate(session_type="running")
+            SessionLogCreate(session_type=SessionType.running)
 
     def test_requires_session_type(self):
         with pytest.raises(Exception):
             SessionLogCreate(session_date=date(2026, 4, 18))
 
-    def test_session_type_is_unconstrained_str(self):
-        """SESSION_TYPE has no enum constraint — any string is accepted.
-        Documented gap: should constrain to running/lifting/mobility."""
-        payload = SessionLogCreate(session_date=date(2026, 4, 18), session_type="anything")
-        assert payload.session_type == "anything"
+    def test_session_type_uses_enum(self):
+        """US-101 FIX: session_type now uses SessionType enum."""
+        payload = SessionLogCreate(session_date=date(2026, 4, 18), session_type=SessionType.running)
+        assert payload.session_type == SessionType.running
+
+    def test_session_type_rejects_invalid_value(self):
+        """US-101 FIX: Invalid session_type values are rejected."""
+        with pytest.raises(Exception):
+            SessionLogCreate(session_date=date(2026, 4, 18), session_type="anything")
 
 
 # ── US-005 H-2: Offline sync _apply_action field safety ────────────────────────
@@ -145,16 +143,12 @@ class TestOfflineApplyActionFieldSafety:
         source = inspect.getsource(_apply_action)
         assert "hasattr" in source
 
-    def test_complete_session_could_overwrite_id_field(self):
-        """WARNING DOCUMENTED: hasattr(SessionLog, 'id') returns True, so
-        a payload with key 'id' would overwrite the session's primary key.
-        This is a real attack surface for offline sync."""
+    def test_complete_session_excludes_id_field(self):
+        """US-101 FIX: The 'id' field is now excluded from the
+        complete_session setattr loop."""
         source = inspect.getsource(_apply_action)
-        # The guard is `if k != "session_log_id" and hasattr(log, k)`
-        # but "id" is not excluded and hasattr(SessionLog, "id") is True
         assert 'k != "session_log_id"' in source
-        # "id" is NOT in the exclusion list — this is the gap
-        assert '"id"' not in source
+        assert '"id"' in source
 
     def test_create_set_log_spreads_remaining_payload(self):
         """create_set_log uses **{} to spread payload minus session_log_id
